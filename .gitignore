@@ -1,0 +1,18 @@
+# 제공 데이터와 가공 데이터는 제3자 제공 금지 규정에 따라 저장소에 올리지 않는다
+data/raw/
+data/processed/
+# 검수 표본에는 회의록 원문이 들어 있다 (검수 결과 gold_*.jsonl은 id와 라벨만 담으므로 포함)
+data/labels/pool_*.jsonl
+# 연락처가 들어 있는 참가신청서
+*.hwp
+# 실행 환경과 대용량 모델 파일
+.venv/
+model/*.bin
+model/*.safetensors
+model/*.gguf
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# 로컬 미리보기 설정
+.claude/

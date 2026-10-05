@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>정답셋 검수</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --paper: #ffffff; --ink: #1c1c1a; --muted: #6b6a64; --line: #dcdad2;
+    --accent: #1f4e5f; --accent-soft: #e3ecef; --mark: #f3e2a6; --warn: #8a3b12;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.7 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  header { display: flex; align-items: center; gap: 24px; padding: 12px 24px;
+           border-bottom: 1px solid var(--line); background: var(--paper); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 700; }
+  .tabs { display: flex; gap: 4px; }
+  .tabs button { border: 1px solid var(--line); background: var(--paper); padding: 4px 12px;
+                 font: inherit; font-size: 14px; cursor: pointer; border-radius: 3px; }
+  .tabs button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .progress { margin-left: auto; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; padding: 24px;
+         max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 4px; padding: 20px 24px; }
+  .meta { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .ctx { font-size: 13px; color: var(--muted); border-left: 2px solid var(--line); padding-left: 12px; margin: 8px 0; }
+  .ctx .who { font-weight: 600; }
+  .target { font-size: 16.5px; line-height: 1.85; border-left: 3px solid var(--accent); padding: 4px 0 4px 14px; margin: 14px 0; }
+  .target .who { display: block; font-size: 13px; color: var(--accent); font-weight: 700; margin-bottom: 2px; }
+  mark { background: var(--mark); padding: 0 1px; }
+  .q { font-weight: 700; margin: 18px 0 10px; }
+  .opts { display: grid; gap: 8px; }
+  .opts button { text-align: left; border: 1px solid var(--line); background: var(--paper); padding: 10px 14px;
+                 font: inherit; cursor: pointer; border-radius: 3px; display: flex; gap: 12px; }
+  .opts button:hover, .opts button:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
+  .key { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); min-width: 1.2em; }
+  .row { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  .row input { flex: 1; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 3px; }
+  .row button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--paper); cursor: pointer; border-radius: 3px; }
+  aside h2 { font-size: 14px; margin: 0 0 8px; }
+  aside dl { margin: 0; font-size: 13.5px; }
+  aside dt { font-weight: 700; margin-top: 10px; }
+  aside dd { margin: 2px 0 0; color: #3a3935; }
+  aside .ex { color: var(--muted); }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 16px; }
+  .done { padding: 40px; text-align: center; color: var(--muted); }
+  .flash { color: var(--warn); font-size: 13px; min-height: 1.4em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>정답셋 검수</h1>
+  <div class="tabs" role="tablist"></div>
+  <div class="progress" id="progress"></div>
+</header>
+<main>
+  <section class="card" id="work"></section>
+  <aside class="card" id="guide"></aside>
+</main>
+<script>
+const TASKS = {
+  ref: {
+    name: "타 지역 언급",
+    q: "노란색으로 표시한 다른 시도 언급은 어떤 성격입니까?",
+    opts: [
+      ["POLICY_REF", "정책 참조", "다른 지역의 조례·제도·사업을 사례나 근거로 삼아 우리 지역 정책을 논한다.", "예: “서울시는 이미 조례를 만들어 시행하고 있습니다.”"],
+      ["COMPARE", "단순 비교", "통계, 순위, 수치를 비교한다. 정책 내용을 참고하는 것은 아니다.", "예: “17개 시도 중 최하위입니다.”"],
+      ["COOP", "협력·연계", "공동사업, 협약, 광역 연계, 행정통합 등 함께 하는 일을 말한다.", "예: “부산·울산·경남 공동 추진”"],
+      ["OTHER", "그 밖", "장소, 출신, 행사, 단순 지명 등 정책과 관계없는 언급이다.", "예: “서울에서 열린 회의에 다녀왔습니다.”"],
+      ["NOT_REGION", "지역 아님(오탐)", "지역명으로 잡혔지만 해당 광역시도가 아니다.", "예: 경기도 광주시, ‘대전환’"],
+    ],
+  },
+  proc: {
+    name: "의사진행 구분",
+    q: "이 문단은 어떤 발언입니까?",
+    opts: [
+      ["PROC", "의사진행", "회의 운영을 위한 발언이다. 정책 내용이 없다.", "예: “의석을 정돈하여 주시기 바랍니다.”, “다음은 질의 순서입니다.”"],
+      ["SUB", "정책 논의", "질의, 답변, 제안, 설명, 보고 등 정책 내용이 있다.", "예: 예산 질의, 조례 제안설명, 집행부 답변"],
+      ["UNSURE", "판단 어려움", "두 성격이 섞여 있거나 너무 짧아 판단하기 어렵다.", ""],
+    ],
+  },
+  topdown: {
+    name: "하향 요인",
+    q: "이 문단의 논의는 상위법이나 중앙정부의 결정에 따른 것입니까?",
+    opts: [
+      ["TOPDOWN", "예", "법령 개정, 정부 지침, 국비 공모, 의무화 등에 따라 지역이 대응하는 논의다.", "예: “법 개정에 따라 조례를 정비하려는 것입니다.”"],
+      ["NOT", "아니오", "지역이 스스로 제기한 논의이거나, 상위 결정이 단순 배경으로만 언급된다.", ""],
+      ["UNSURE", "판단 어려움", "어느 쪽인지 문단만으로 판단하기 어렵다.", ""],
+    ],
+  },
+};
+let task = "ref", item = null;
+const $ = (s) => document.querySelector(s);
+const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function highlight(it) {
+  if (!it.regions || !it.regions.length) return esc(it.text);
+  let out = "", pos = 0;
+  for (const [, s, e] of it.regions) {
+    if (s < pos) continue;
+    out += esc(it.text.slice(pos, s)) + "<mark>" + esc(it.text.slice(s, e)) + "</mark>";
+    pos = e;
+  }
+  return out + esc(it.text.slice(pos));
+}
+
+function renderTabs() {
+  $(".tabs").innerHTML = Object.entries(TASKS).map(([k, t]) =>
+    `<button role="tab" aria-pressed="${k === task}" data-k="${k}">${t.name}</button>`).join("");
+  document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { task = b.dataset.k; load(); });
+}
+
+function renderGuide() {
+  const t = TASKS[task];
+  $("#guide").innerHTML = `<h2>판정 기준: ${t.name}</h2><dl>` + t.opts.map(([, n, d, ex], i) =>
+    `<dt>${i + 1}. ${n}</dt><dd>${d}${ex ? `<div class="ex">${ex}</div>` : ""}</dd>`).join("") +
+    `</dl><p class="hint">숫자 키로 선택, S는 건너뛰기, Z는 직전 라벨 되돌리기입니다. 메모 칸에 입력 중일 때는 단축키가 동작하지 않습니다.</p>`;
+}
+
+async function stats() {
+  const s = await (await fetch("/api/stats")).json();
+  $("#progress").textContent = Object.entries(TASKS).map(([k, t]) => `${t.name} ${s[k].done}/${s[k].total}`).join(" · ");
+}
+
+async function load() {
+  renderTabs(); renderGuide();
+  const r = await (await fetch(`/api/next?task=${task}`)).json();
+  item = r.item;
+  const t = TASKS[task];
+  if (!item) { $("#work").innerHTML = `<div class="done">이 과제의 표본을 모두 검수했습니다.</div>`; stats(); return; }
+  const c = item.context || {};
+  $("#work").innerHTML = `
+    <div class="meta"><b>${esc(item.council)}</b> · ${esc(item.date)} · ${esc(item.mints_nm)} · ${esc(item.committee || "")}</div>
+    ${c.prev ? `<div class="ctx"><span class="who">${esc(c.prev.speaker)}</span> ${esc(c.prev.text)}</div>` : ""}
+    <div class="target"><span class="who">${esc(item.speaker)}</span>${highlight(item)}</div>
+    ${c.next ? `<div class="ctx"><span class="who">${esc(c.next.speaker)}</span> ${esc(c.next.text)}</div>` : ""}
+    <div class="q">${t.q}</div>
+    <div class="opts">${t.opts.map(([v, n], i) => `<button data-v="${v}"><span class="key">${i + 1}</span><span>${n}</span></button>`).join("")}</div>
+    <div class="row"><input id="note" placeholder="메모 (선택)"><button id="skip">건너뛰기 (S)</button><button id="undo">되돌리기 (Z)</button></div>
+    <div class="flash" id="flash"></div>`;
+  document.querySelectorAll(".opts button").forEach((b) => b.onclick = () => send(b.dataset.v));
+  $("#skip").onclick = () => send("SKIP");
+  $("#undo").onclick = undo;
+  stats();
+}
+
+async function send(label) {
+  if (!item) return;
+  await fetch("/api/label", { method: "POST", body: JSON.stringify({ task, pid: item.pid, label, note: $("#note").value }) });
+  load();
+}
+async function undo() {
+  const r = await (await fetch("/api/undo", { method: "POST", body: JSON.stringify({ task }) })).json();
+  load().then(() => { if (r.ok) $("#flash").textContent = "직전 라벨을 되돌렸습니다."; });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT") return;
+  const n = parseInt(e.key, 10), opts = TASKS[task].opts;
+  if (n >= 1 && n <= opts.length) send(opts[n - 1][0]);
+  else if (e.key.toLowerCase() === "s") send("SKIP");
+  else if (e.key.toLowerCase() === "z") undo();
+});
+load();
+</script>
+</body>
+</html>
