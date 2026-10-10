@@ -1,0 +1,27 @@
+# 실행 환경 (conda). 개발에 쓴 환경의 패키지 버전을 그대로 고정했다.
+#   conda env create -f environment.yml
+#   conda activate council-diffusion
+# 확인한 개발 환경: Windows 11, NVIDIA GeForce RTX 4060 Laptop GPU (8GB), 드라이버 592.82, CUDA 12.6
+name: council-diffusion
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu126
+      # 전처리, 문단 분할, 약지도 라벨, 검수 표본 (01~06단계)
+      - numpy==2.4.6
+      - pandas==3.0.6
+      - pyarrow==26.0.0
+      - lxml==6.1.3
+      - tqdm==4.70.1
+      # 노트북 실행
+      - ipykernel==7.4.0
+      # 임베딩과 판정 모델 (2단계부터 사용)
+      - torch==2.14.1+cu126
+      - transformers==5.19.0
+      - sentence-transformers==6.1.0
+      - tokenizers==0.23.3
+      - safetensors==0.8.0
+      - scikit-learn==1.9.1

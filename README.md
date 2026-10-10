@@ -9,9 +9,11 @@
 
 이 저장소는 KISTI가 주관하는 「2026 DATA·AI 분석 경진대회」 문제해결 부문에서 국회도서관이 출제한 문제 「광역 지방의회 회의록 기반 지방정책 이슈 트랜드 분석 및 흐름 예측」에 개인으로 참가한 프로젝트의 코드와 문서를 담고 있다. 이 프로젝트는 17개 광역의회의 2024~2025년 회의록을 분석해, 지방정책 이슈마다 주요 키워드, 데이터 범위 안에서 처음 관측된 시점, 다른 의회에서의 후속 논의 흐름, 향후 확산 가능성을 제시하는 것을 목표로 한다. 결과마다 판단 근거가 된 회의록명, 회의일자, 원문 구간을 붙인다. 또 의회 사이의 연결에는 원문에 명시적인 참조가 있는지, 아니면 시간의 선후만 있는지를 구분해 표시하며, 의회 사이의 인과관계는 단정하지 않는다.
 
-## 현재 상태 (2026-10-06)
+## 현재 상태 (2026-10-11)
 
 전처리, 문단 분할, 약지도 라벨(규칙으로 자동 생성한 불완전한 학습용 라벨) 생성까지 마쳤고, 판정 모델은 아직 학습하지 않았다. 따라서 이 저장소에는 아직 이슈별 분석 결과가 없다. 결과 제출 마감은 2026-11-06이다.
+
+10/8~10/10에 키워드 입력형 다중 모델 파이프라인을 시도했지만 폐기했다. 결과표에 예시 데이터가 섞였고, 측정하지 않은 값을 확률과 요인 기여도로 표시했기 때문이다. 경위는 `docs/작업기록.md`, 이후 계획은 `docs/05_재정비_계획.md`와 `docs/06_아이디어_검토.md`에 있다.
 
 | 단계 | 상태 | 실측 결과 |
 |---|---|---|
@@ -29,7 +31,7 @@
 ```
 (저장소 루트)
 ├─ README.md
-├─ pyproject.toml, uv.lock, .python-version   실행 환경 정의 (uv)
+├─ environment.yml         실행 환경 정의 (conda)
 ├─ src/                    처리 모듈
 │   ├─ load.py             제공 zip 파일 읽기, zip 안 파일명 인코딩 복원
 │   ├─ parse.py            회의록 HTML을 평문으로 변환
@@ -51,44 +53,45 @@
     └─ labels/             검수 표본(pool_*.jsonl, 저장소에 포함하지 않음)과 검수 결과(gold_*.jsonl)
 ```
 
-`data/raw/`, `data/processed/`, 회의록 원문이 들어 있는 검수 표본(`data/labels/pool_*.jsonl`), 참가신청서 파일(`*.hwp`), 실행 환경(`.venv/`), 대용량 모델 가중치 파일(`model/*.bin`, `*.safetensors`, `*.gguf`)은 `.gitignore`로 저장소에서 제외한다.
+`data/raw/`, `data/processed/`, 회의록 원문이 들어 있는 검수 표본(`data/labels/pool_*.jsonl`), 회의록 원문 인용이 들어갈 결과 폴더(`results/`), 참가신청서 파일(`*.hwp`), 대용량 모델 가중치 파일(`model/*.bin`, `*.safetensors`, `*.gguf`)은 `.gitignore`로 저장소에서 제외한다. 결과 폴더는 대회 제출 파일에는 넣는다.
 
 ## 실행 환경
 
 | 항목 | 내용 |
 |---|---|
 | 운영체제 | Windows 11 (개발에 쓴 환경이다. 다른 운영체제에서의 실행은 아직 확인하지 않았다) |
-| Python | 3.11 (`.python-version`) |
-| 패키지 관리 | uv (`pyproject.toml`, `uv.lock`) |
-| 주요 라이브러리 (`uv.lock` 기준) | lxml 6.1.3, pandas 3.0.6, pyarrow 25.0.1, tqdm 4.70.1 |
-| GPU, NVIDIA 드라이버, CUDA | 현재 스크립트(01~06)와 검수 도구는 GPU를 쓰지 않는다. 모델 학습 단계부터의 버전은 해당 단계에서 기재한다 |
+| Python | 3.11.17 |
+| 패키지 관리 | conda (`environment.yml`). 패키지는 pip로 설치하고 버전을 고정했다 |
+| 주요 라이브러리 | pandas 3.0.6, pyarrow 26.0.0, lxml 6.1.3, tqdm 4.70.1, numpy 2.4.6. 2단계부터: torch 2.14.1+cu126, transformers 5.19.0, sentence-transformers 6.1.0, scikit-learn 1.9.1 |
+| GPU, NVIDIA 드라이버, CUDA | NVIDIA GeForce RTX 4060 Laptop GPU (8GB), 드라이버 592.82, CUDA 12.6. 현재 스크립트(01~06)와 검수 도구는 GPU를 쓰지 않는다 |
 
 ## 실행 방법
 
-1. uv를 설치한다(설치 방법은 uv 공식 문서를 따른다).
-2. 저장소 루트에서 다음 명령으로 실행 환경을 만든다.
+1. conda(Miniconda 등)를 설치한다.
+2. 저장소 루트에서 다음 명령으로 실행 환경을 만들고 켠다.
 
    ```
-   uv sync
+   conda env create -f environment.yml
+   conda activate council-diffusion
    ```
 
 3. 아래 "데이터 안내" 절에 따라 제공 zip 파일 두 개를 `data/raw/`에 둔다.
 4. 저장소 루트에서 스크립트를 번호 순서대로 실행한다.
 
    ```
-   uv run python scripts/01_inventory.py
-   uv run python scripts/02_preprocess.py
-   uv run python scripts/02b_dedupe.py
-   uv run python scripts/03_data_summary.py
-   uv run python scripts/04_passages.py
-   uv run python scripts/05_weak_labels.py
-   uv run python scripts/06_label_pool.py
+   python scripts/01_inventory.py
+   python scripts/02_preprocess.py
+   python scripts/02b_dedupe.py
+   python scripts/03_data_summary.py
+   python scripts/04_passages.py
+   python scripts/05_weak_labels.py
+   python scripts/06_label_pool.py
    ```
 
 5. 검수 표본을 사람이 판정할 때는 검수 도구를 실행하고 브라우저에서 `http://127.0.0.1:8765`를 연다. 이 도구는 자기 컴퓨터(127.0.0.1)에서만 열린다.
 
    ```
-   uv run python src/labeler/server.py
+   python src/labeler/server.py
    ```
 
 각 스크립트의 입력과 출력은 다음과 같다. 출력 파일은 따로 적지 않으면 `data/processed/`에 저장된다.
@@ -113,7 +116,7 @@
 `site/`는 빌드 도구 없이 동작하는 정적 페이지다. 저장소 루트에서 다음 명령을 실행하고 `http://127.0.0.1:8766/`을 연다. `main` 브랜치에 `site/`가 바뀌어 올라가면 `.github/workflows/pages.yml`이 GitHub Pages로 배포한다.
 
 ```
-uv run python -m http.server 8766 --bind 127.0.0.1 --directory site
+python -m http.server 8766 --bind 127.0.0.1 --directory site
 ```
 
 ## 데이터 안내
@@ -148,7 +151,7 @@ data/raw/2025_광역 회의록.zip
 - 수상작은 주최 측을 통해 공개되므로, 재배포가 가능한 라이선스가 명시된 모델만 골랐다.
 - 서술용 LLM은 근거 묶음을 문장으로 옮기는 데만 쓰고, 예측에는 쓰지 않는다. 그리고 2024년 학습, 2025년 검증 실험에 미래 정보가 섞이지 않도록 2025년 이전에 공개된 모델을 쓴다.
 - 최종 제출 전에 각 모델의 라이선스 원문을 다시 확인하고, 명칭, 버전(커밋 해시), 용도, 적용 범위를 이 표에 적는다.
-- 실행 라이브러리(lxml, pandas, pyarrow, tqdm)의 라이선스는 제출 전에 확인해 기재한다.
+- 실행 라이브러리(`environment.yml`에 적은 것)의 라이선스는 제출 전에 확인해 기재한다.
 
 ## 문서 목록
 
@@ -159,6 +162,8 @@ data/raw/2025_광역 회의록.zip
 | `docs/02_계획.md` | 문제 요구사항, 이용자, 단계와 상태, 검증 계획, 일정, 아직 열려 있는 문제 |
 | `docs/03_조사_정리.md` | 대회와 출제 기관, 정책확산 선행연구, 국내외 사례 |
 | `docs/04_아키텍처.md` | L0~L7 계층 구조, 모듈별 모델과 평가 지표, 계산량 추정 |
+| `docs/05_재정비_계획.md` | 10/11 현재 상태 점검, 심사 기준과의 대응, 범위 조정, 단계별 일정 |
+| `docs/06_아이디어_검토.md` | 부분별 아이디어와 우선순위, 데이터로 가정을 확인한 결과 |
 | `docs/작업기록.md` | 날짜별 주요 판단, 검토 후 버린 대안, AI 활용 기록 |
 | `docs/페이지_기획.md`, `docs/페이지_디자인.md` | 프로젝트 소개 페이지의 구성과 문안, 시각 설계 명세 |
 
@@ -173,12 +178,12 @@ data/raw/2025_광역 회의록.zip
 - **라이선스가 명시된 모델만 쓴다.** 위 "사용 모델과 라이선스" 절을 참조한다.
 - **AI 활용 기록을 남긴다.** 개발 과정에서 Claude Code(Anthropic)를 문제 분석, 선행연구와 사례 조사, 코드 작성, 문서 작성의 보조 도구로 썼다. 주요 판단, 버린 대안, 실패 사례는 `docs/작업기록.md`에 날짜별로 쌓고 있으며, 제출 때 규정의 "AI 활용범위와 주요 검토 과정" 여섯 항목으로 정리한다. 제공 데이터를 분석하는 제출 시스템에는 상용 API를 쓰지 않는다.
 
-### 제출 전 확인 목록 (2026-10-06 현재)
+### 제출 전 확인 목록 (2026-10-11 현재)
 
 | 확인 항목 | 현재 상태 |
 |---|---|
 | README.md에 구성과 실행 방법이 설명되어 있는가 | 01~06 단계와 검수 도구까지 작성함. 이후 단계는 해당 단계에서 기재 |
-| 실행환경과 라이브러리 버전이 명시되어 있는가 | 01~06 단계에 필요한 버전은 적음. GPU, 드라이버, CUDA는 학습 단계에서 기재 |
+| 실행환경과 라이브러리 버전이 명시되어 있는가 | `environment.yml`에 개발 환경의 버전을 고정함. GPU, 드라이버, CUDA 버전을 적음. 새 환경에서 처음부터 만들어 보는 확인은 아직 하지 않음 |
 | 학습과 평가(추론) 과정을 확인할 수 있는가 | 아직 없음 (모델 학습 전) |
 | 데모영상이 포함되어 있는가 | 아직 없음 |
 | 외부 데이터, 코드, 모델의 이용조건을 확인했는가 | 모델 라이선스는 확인함(2026-10-06). 제출 전에 다시 확인할 예정 |

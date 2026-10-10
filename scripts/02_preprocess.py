@@ -11,6 +11,9 @@ import sys
 import time
 from pathlib import Path
 
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]

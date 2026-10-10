@@ -10,7 +10,11 @@ HTML이 완전히 같은 중복은 02_preprocess에서 이미 표시했다(dup_o
 """
 import difflib
 import re
+import sys
 from pathlib import Path
+
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import pandas as pd
 
