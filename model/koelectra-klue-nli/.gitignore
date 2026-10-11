@@ -1,0 +1,4 @@
+# 학습된 가중치는 용량이 커서 저장소에 올리지 않는다 (scripts/07_train_nli.py로 다시 만든다)
+*.safetensors
+*.bin
+*.pt

@@ -8,6 +8,15 @@
   B형: '위원장 홍길동' 처럼 발언자만 한 줄에 있고 다음 줄부터 발언이 이어진다.
        (광주·인천·전남·전북 시스템. 전남은 '의장 홍 길 동'처럼 이름 글자 사이에 공백이 있다.)
 문서마다 두 형식의 매칭 수를 비교해 많은 쪽을 쓴다.
+
+2026-10-11 보강 (놓친 발언자 경계 약 10.5만 개, docs/10_도메인_난이도.md 1절):
+  - 두 단어 이상의 직함: '○ 교육청 예산기획과장 최진욱' (부산)
+  - 영문이 섞인 직함: '○메타AI과학국장 이정우', '○APEC준비지원단장 김상철' (경북)
+  - '자'로 끝나는 직함: '○제주시장인사청문대상자 김완근' (제주·충북)
+  - A형에서 띄어 쓴 이름: '○환경산림국장 구 상' (충남)
+  - B형에서 이름과 직함이 붙은 줄: '박정희위원' (전북)
+안건 목록이 개의 표시 뒤, 위원장 발언 안에 나오는 회의록(부산 2024년 4분기 이후)은
+"안건을 상정…" 발화 바로 뒤의 번호 항목을 안건으로 읽는다.
 """
 from __future__ import annotations
 
@@ -17,16 +26,24 @@ from dataclasses import dataclass, field
 # ---------------------------------------------------------------- 공통 패턴
 NAME = r"[가-힣]{2,4}(?:\([^)\n]{1,12}\))?"          # 김성수(안양)
 SPACED_NAME = r"[가-힣](?: [가-힣]){1,3}"             # 홍 길 동
-ROLE_TOKEN = r"[가-힣·ㆍ()0-9]{1,24}?[장원관감사인행리표수문]"
-ROLE = rf"{ROLE_TOKEN}(?: (?:직무대행|직무대리|대행|대리))?"
-NAME_ROLE_SUFFIX = r"(?:의원|위원|교육감|부의장|의장)"
+ROLE_TOKEN = r"[가-힣A-Za-z·ㆍ().0-9]{1,24}?[장원관감사인행리표수문자]"
+ROLE_WORD = r"[가-힣A-Za-z·ㆍ().0-9]{1,20}"                # 직함 앞에 붙는 기관명 (교육청 등)
+ROLE = rf"(?:{ROLE_WORD} ){{0,2}}?{ROLE_TOKEN}(?: (?:직무대행|직무대리|대행|대리))?"
+NAME_ROLE_SUFFIX = r"(?:부위원장|위원장|부의장|의장|의원|위원|교육감)"
+COMPACT_ROLE = r"(?:부위원장|부의장|위원장|위원|의원|의장)"  # '박정희위원'처럼 이름에 붙어 쓰는 직함
 
+# 이름 뒤 구분: 공백, 줄끝, '>'(서울 일부 '○재무국장 이상훈> 네.'). 직함 뒤 '(의석에서)' 허용(충남)
 SPK_A = re.compile(
-    rf"^○ ?(?:(?P<name2>{NAME}) (?P<role2>{NAME_ROLE_SUFFIX})|(?P<role>{ROLE}) (?P<name>{NAME}))(?: |$)"
+    rf"^○ ?(?:(?P<name2>{NAME}) (?P<role2>{NAME_ROLE_SUFFIX})(?:\([^)\n]{{1,10}}\))?"
+    rf"|(?P<role>{ROLE}) (?P<name>{NAME}|{SPACED_NAME}))(?:[ >]|$)"
 )
 SPK_B = re.compile(
-    rf"^(?:[▶↘→] ?)?(?:(?P<name2>{NAME}) (?P<role2>{NAME_ROLE_SUFFIX})|(?P<role>{ROLE}) (?P<name>{NAME}|{SPACED_NAME}))$"
+    rf"^(?:[▶↘→] ?)?(?:(?P<name2>{NAME}) (?P<role2>{NAME_ROLE_SUFFIX})|(?P<role>{ROLE}) (?P<name>{NAME}|{SPACED_NAME})"
+    rf"|(?P<name3>[가-힣]{{2,4}}?)(?P<role3>{COMPACT_ROLE}))$"
 )
+# 개의 뒤 위원장 발언 안에서 안건 목록이 시작됨을 알리는 말
+AGENDA_CUE = re.compile(r"안건을?\s*(?:일괄\s*)?상정|상정(?:토록|하도록|하겠습니다|합니다)")
+SUB_ITEM = re.compile(r"^[가-하]\.\s")
 
 # 본문 시작 단서: '일시', '일 시', '일자'로 시작하는 줄
 DATE_LINE = re.compile(r"^(?:일 ?시|일 ?자)\s*[:：]?\s*\d{4}\s*년")
@@ -140,16 +157,36 @@ def parse(text: str) -> Parsed:
     open_i = next((i for i in range(head_i, len(lines)) if OPEN_MARK.match(lines[i][1].strip())), None)
     stop_i = open_i if open_i is not None else min(len(lines), head_i + 80)
     seen = set()
+
+    def add_item(i, mm):
+        title = mm.group(2).strip()
+        key = re.sub(r"\(.*?\)|\s", "", title)
+        if key in seen:
+            return
+        seen.add(key)
+        p.agenda.append(dict(no=int(mm.group(1)), title=title, kind=agenda_kind(title),
+                             start=lines[i][0], end=lines[i][0] + len(lines[i][1])))
+
     for i in range(head_i, stop_i):
         mm = AGENDA_ITEM.match(lines[i][1].strip())
         if mm:
-            title = mm.group(2).strip()
-            key = re.sub(r"\(.*?\)|\s", "", title)
-            if key in seen:
+            add_item(i, mm)
+    # 4-1) 개의 앞에 안건 목록이 없으면, 개의 뒤 60줄 안의 "안건을 상정…" 발화 바로 뒤 번호 항목을 읽는다
+    if not p.agenda and open_i is not None:
+        for i in range(open_i, min(len(lines), open_i + 60)):
+            if not AGENDA_CUE.search(lines[i][1]):
                 continue
-            seen.add(key)
-            p.agenda.append(dict(no=int(mm.group(1)), title=title, kind=agenda_kind(title),
-                                 start=lines[i][0], end=lines[i][0] + len(lines[i][1])))
+            j = i + 1
+            while j < len(lines) and j < i + 300:
+                s = lines[j][1].strip()
+                mm = AGENDA_ITEM.match(s)
+                if mm:
+                    add_item(j, mm)
+                elif not (SUB_ITEM.match(s) or not s):
+                    break
+                j += 1
+            if p.agenda:
+                break
 
     # 5) 발언 분리
     body_lines = [(o, l) for o, l in lines if p.body_start <= o < p.body_end]
@@ -169,8 +206,13 @@ def parse(text: str) -> Parsed:
     p.spk_format = "B" if use_b else "A"
     for k, (hs, ss, m) in enumerate(hits):
         end = hits[k + 1][0] if k + 1 < len(hits) else p.body_end
-        role = m.group("role2") if m.group("name2") else m.group("role")
-        name = m.group("name2") or m.group("name")
+        g = m.groupdict()
+        if g.get("name2"):
+            role, name = g["role2"], g["name2"]
+        elif g.get("name3"):
+            role, name = g["role3"], g["name3"]
+        else:
+            role, name = g["role"], g["name"]
         p.utterances.append(Utterance(role=_clean_name(role), name=_clean_name(name),
                                       start=min(ss, end), end=end, head_start=hs))
     return p

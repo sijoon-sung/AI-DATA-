@@ -1,0 +1,118 @@
+{
+  "base_model": "monologg/koelectra-base-v3-discriminator",
+  "base_model_license": "Apache-2.0",
+  "train_data": "klue/klue nli train",
+  "eval_data": "klue/klue nli validation",
+  "data_license": "CC BY-SA 4.0",
+  "labels": {
+    "0": "entailment",
+    "1": "neutral",
+    "2": "contradiction"
+  },
+  "config": {
+    "seed": 20261011,
+    "epochs": 3,
+    "lr": 3e-05,
+    "batch_size": 32,
+    "max_len": 128,
+    "warmup_ratio": 0.1,
+    "weight_decay": 0.01,
+    "fp16": true,
+    "grad_clip": 1.0,
+    "n_train": 24998,
+    "n_val": 3000,
+    "train_pairs_truncated": 0
+  },
+  "log": [
+    {
+      "epoch": 1,
+      "train_loss": 0.5784,
+      "val_loss": 0.4105,
+      "val_acc": 0.8417,
+      "val_macro_f1": 0.8413,
+      "sec": 101.7
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.2577,
+      "val_loss": 0.4017,
+      "val_acc": 0.858,
+      "val_macro_f1": 0.8578,
+      "sec": 101.2
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.1316,
+      "val_loss": 0.4966,
+      "val_acc": 0.8577,
+      "val_macro_f1": 0.8571,
+      "sec": 106.1
+    }
+  ],
+  "best_epoch": 2,
+  "val_accuracy": 0.858,
+  "val_macro_f1": 0.8578,
+  "per_class": {
+    "entailment": {
+      "precision": 0.8832,
+      "recall": 0.885,
+      "f1": 0.8841,
+      "support": 1000
+    },
+    "neutral": {
+      "precision": 0.847,
+      "recall": 0.814,
+      "f1": 0.8302,
+      "support": 1000
+    },
+    "contradiction": {
+      "precision": 0.8438,
+      "recall": 0.875,
+      "f1": 0.8591,
+      "support": 1000
+    }
+  },
+  "confusion_matrix": {
+    "rows_true_cols_pred": [
+      "entailment",
+      "neutral",
+      "contradiction"
+    ],
+    "matrix": [
+      [
+        885,
+        60,
+        55
+      ],
+      [
+        79,
+        814,
+        107
+      ],
+      [
+        38,
+        87,
+        875
+      ]
+    ]
+  },
+  "val_accuracy_by_source": {
+    "NSMC": 0.86,
+    "airbnb": 0.895,
+    "policy": 0.8733,
+    "wikinews": 0.8244,
+    "wikipedia": 0.8533,
+    "wikitree": 0.8289
+  },
+  "note": "에폭 선택과 평가를 같은 validation으로 해서 정확도가 약간 낙관적이다",
+  "runtime_sec": 316.8,
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "gpu_memory": {
+    "max_allocated_gb": 3.1,
+    "max_reserved_gb": 3.5
+  },
+  "versions": {
+    "torch": "2.14.1+cu126",
+    "transformers": "5.19.0"
+  }
+}
