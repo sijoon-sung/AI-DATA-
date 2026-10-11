@@ -1,6 +1,10 @@
 # 제공 데이터와 가공 데이터는 제3자 제공 금지 규정에 따라 저장소에 올리지 않는다
 data/raw/
 data/processed/
+# 검색 색인(회의록 원문에서 만든 벡터와 BM25 색인)
+data/index/
+# 정책 카탈로그(회의록에서 센 말·후보·LLM 프로필)
+data/catalog/
 data/processed_backup*/
 # 검수 표본에는 회의록 원문이 들어 있다 (검수 결과 gold_*.jsonl은 id와 라벨만 담으므로 포함)
 data/labels/pool_*.jsonl

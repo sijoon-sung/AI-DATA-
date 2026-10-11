@@ -143,6 +143,43 @@
 - **추론**: `08_issue_cards.py`가 ① 안건 제목을 정규화해 bge-m3로 묶어 정책 수단을 만들고 핵심 이슈를 고른다. ② 이슈 별칭(띄어쓰기 무시 정규식)으로 문단 368만 개에서 후보를 모으고, 후보 전부를 bge-reranker-v2-m3로 "이 문단이 이 이슈를 말하는가" 점수를 매긴다. ③ 별칭마다 관련 비율(점수 0.5 이상 비율)을 재서, 대표 별칭보다 비율이 크게 낮은 넓은 별칭으로만 걸린 문단은 점수 0.5 이상일 때만 쓴다(이름만 같은 다른 이야기를 거른다). 점수 0.5 이상인 가장 이른 문단을 "확인된 최초 관측"으로 쓴다. ④ 다른 의회의 정책을 언급한 문장은 규칙으로 찾은 뒤 NLI 판정기로 거른다. ⑤ 이슈 카드의 문장은 템플릿으로 채우고, 인용은 원문 문단과 글자 일치를 검사한다. LLM은 쓰지 않는다.
 - **평가**: 확산 예측은 결과 창이 겹치지 않는 두 기준점(2025-01-01, 2025-07-01)에서 백테스트한다(AUC, Brier 기술 점수, 등급별 실측 빈도와 95% 신뢰구간, 같은 이슈 안 AUC). 결과는 `results/forecast_backtest.json`에 저장된다. 관련 판정과 참조 판정의 정확도는 사람 정답셋(검수 도구로 작성 중)으로 잴 계획이며, 아직 재지 않았다.
 
+### 정책 카탈로그: 이름이 아니라 내용으로 지역 정책 묶기 (개발 중, 10/11)
+
+같은 목적의 정책이 지역마다 다른 이름으로 운영된다(서울 기후동행카드, 부산 동백패스, 세종 이응패스 등). 이름으로 추적하면 "부산에만 있는 정책"이라는 틀린 감시 결과가 나온다. 그래서 문단을 의미로 먼저 묶고, 로컬 LLM이 묶음마다 정책 주제와 의회별 정책 이름을 붙인다. 손으로 만든 이름 목록은 쓰지 않으므로 새 회의록도 같은 절차로 처리한다. 설계와 경위는 `reports/사용자_니즈와_이상적인_답.md`에 있다.
+
+1. 의회별 검색 색인을 만든다. 끝난 의회는 건너뛰므로 끊겨도 이어서 돈다.
+
+   ```
+   python scripts/09_build_index.py --part bm25     # CPU 약 25분
+   python scripts/09_build_index.py --part dense    # GPU 약 2시간(다른 GPU·CPU 작업이 있으면 크게 느려진다)
+   ```
+
+2. 주제를 만들고 이름을 붙인다.
+
+   ```
+   python scripts/15_policy_topics.py fit --k 800
+   python scripts/15_policy_topics.py assign
+   python scripts/15_policy_topics.py describe
+   python scripts/15_policy_topics.py label        # 로컬 Qwen2.5-7B(GPU), 주제당 약 10초. 끊기면 이어서 한다
+   python scripts/15_policy_topics.py family
+   python scripts/15_policy_topics.py eval         # eval/gold_families.json(평가 전용 정답)과 비교
+   ```
+
+3. 새 회의록이 들어온 상황을 흉내 내는 실험이다. 2024년으로만 주제를 만들고, 2025년 문단을 나중에 배정한다.
+
+   ```
+   python scripts/15_policy_topics.py fit --k 800 --until 2024-12-31
+   python scripts/15_policy_topics.py assign --until 2024-12-31   # (fit 뒤 전체 배정 대신)
+   python scripts/15_policy_topics.py assign --since 2025-01-01
+   ```
+
+결과는 `data/catalog/topics/`에 저장된다. 회의록에서 만든 것이므로 저장소에 올리지 않는다.
+
+10/11 시험 결과(LLM 단계 전, 8개 의회, 주제 200개):
+- 교통비 지원 가족(기후동행카드, 동백패스, 이응패스, I-패스, G-패스, K-패스)은 모두 같은 주제에 가장 많이 모였다.
+- 이름만 비슷한 하이패스, 투어패스, 문화예술패스는 다른 주제로 갔다.
+- 지역화폐 가족은 아직 여러 주제로 흩어져 있다(쌍 정밀도 1.0, 쌍 재현율 0.34).
+
 ### 소개 페이지를 로컬에서 보기
 
 `site/`는 빌드 도구 없이 동작하는 정적 페이지다. 저장소 루트에서 다음 명령을 실행하고 `http://127.0.0.1:8766/`을 연다. `main` 브랜치에 `site/`가 바뀌어 올라가면 `.github/workflows/pages.yml`이 GitHub Pages로 배포한다.

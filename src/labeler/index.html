@@ -62,6 +62,24 @@
 </main>
 <script>
 const TASKS = {
+  rel: {
+    name: "이슈 관련성",
+    q: "이 문단은 위 이슈(정책)를 다룹니까?",
+    opts: [
+      ["CENTRAL", "중심적으로 다룸", "이 정책(조례·사업·제도)을 설명, 질의, 토론, 보고한다.", "예: 조례 제안설명, 이 사업에 대한 질의와 답변"],
+      ["MENTION", "지나가며 언급", "이 정책을 가리키는 말이 있지만 다른 이야기가 중심이다.", "예: 여러 사업을 나열하는 가운데 한 줄 언급"],
+      ["UNRELATED", "무관·동명이의", "이름이나 낱말만 같고 이 정책 이야기가 아니다.", "예: '복합개발'이 다른 개발사업을 가리킴"],
+    ],
+  },
+  e1: {
+    name: "다른 의회 정책 언급",
+    q: "노란색으로 표시한 지역의 정책·조례·사업을 사례로 언급합니까?",
+    opts: [
+      ["YES", "예", "그 지역(광역 자치단체나 의회, 교육청)이 만들었거나 시행하는 정책·조례·사업을 말한다.", "예: “경기도는 이미 인공지능산업 육성 조례가 있어요.”"],
+      ["NO", "아니오", "지명이 나오지만 그 지역의 정책을 말하는 것이 아니다(협력, 지리, 사건, 기초자치단체 등).", "예: “경북 산불 때 구호물자를 지원했다.”"],
+      ["UNSURE", "판단 어려움", "문장만으로 판단하기 어렵다.", ""],
+    ],
+  },
   ref: {
     name: "타 지역 언급",
     q: "노란색으로 표시한 다른 시도 언급은 어떤 성격입니까?",
@@ -92,7 +110,7 @@ const TASKS = {
     ],
   },
 };
-let task = "ref", item = null;
+let task = "rel", item = null;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -122,7 +140,7 @@ function renderGuide() {
 
 async function stats() {
   const s = await (await fetch("/api/stats")).json();
-  $("#progress").textContent = Object.entries(TASKS).map(([k, t]) => `${t.name} ${s[k].done}/${s[k].total}`).join(" · ");
+  $("#progress").textContent = Object.entries(TASKS).filter(([k]) => s[k] && s[k].total).map(([k, t]) => `${t.name} ${s[k].done}/${s[k].total}`).join(" · ");
 }
 
 async function load() {
@@ -133,6 +151,7 @@ async function load() {
   if (!item) { $("#work").innerHTML = `<div class="done">이 과제의 표본을 모두 검수했습니다.</div>`; stats(); return; }
   const c = item.context || {};
   $("#work").innerHTML = `
+    ${item.issue ? `<div class="issue"><b>이슈:</b> ${esc(item.issue)}${item.issue_def && item.issue_def !== item.issue ? ` <span class="hint">(${esc(item.issue_def)})</span>` : ""}${item.target ? ` · <b>확인할 지역:</b> ${esc(item.target)}` : ""}</div>` : ""}
     <div class="meta"><b>${esc(item.council)}</b> · ${esc(item.date)} · ${esc(item.mints_nm)} · ${esc(item.committee || "")}</div>
     ${c.prev ? `<div class="ctx"><span class="who">${esc(c.prev.speaker)}</span> ${esc(c.prev.text)}</div>` : ""}
     <div class="target"><span class="who">${esc(item.speaker)}</span>${highlight(item)}</div>

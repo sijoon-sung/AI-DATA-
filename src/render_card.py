@@ -24,6 +24,8 @@ def cite_html(c, show_doc=True):
     doc = f' · {e(c["doc"])}' if show_doc and c.get("doc") else ""
     role = f' · {e(str(c["role"]))}' if c.get("role") else ""
     kind = " · 안건 제목(안건 표에서)" if c.get("kind") == "안건 제목" else ""
+    if c.get("via") == "semantic":
+        kind += " · 별칭 없이 의미 검색으로 찾음"
     return (f'<div class="cite"><div class="q">"{e(c["quote"])}"</div>'
             f'<div class="src">{e(c["council"])} · {e(c["date"])}{doc}{role}{kind}{v}</div></div>')
 
@@ -349,6 +351,7 @@ td.name{{min-width:220px}}
 .chip{{display:inline-block;border:1px solid;border-radius:999px;padding:1px 10px;font-size:12.5px;white-space:nowrap}}
 </style></head><body><main><div class="note">자동 생성 · 사람 검수 전 · 2024-01~2025-12 17개 광역의회 회의록 · LLM 미사용(규칙 + 인코더)</div>
 <h1>광역의회 정책 이슈 확산 목차</h1>
+<p class="note">의회별 감시 화면: {" · ".join(f'<a href="../councils/{x}.html">{x}</a>' for x in ["서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주"])}</p>
 <p class="note">핵심 이슈 {len(cards)}개. 조례 수 괄호 안은 본회의 가결이 확인된 의회 수. 예측 백테스트 — {e(metrics)}</p>
 <h2>조례로 퍼진 정책 수단 ({len(inst)}개)</h2>
 <p class="note">안건 제목을 정규화해 묶은 정책 수단 중에서 골랐다. 순위는 공개 규칙(의회 수, 제정 의회 수, 기간 중 신규 등장, 상향 신호)으로 정했다.

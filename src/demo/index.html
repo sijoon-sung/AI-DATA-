@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>회의록 이슈 질의응답</title>
+<style>
+:root{--fg:#2C2C2A;--mut:#5F5E5A;--line:#D3D1C7;--bg:#FAFAF7;--card:#fff;--head:#F1EFE8;--acc:#0F6E56;--ok:#0F6E56;--bad:#A32D2D;--tmpl:#185FA5;--warn:#854F0B}
+@media (prefers-color-scheme: dark){:root{--fg:#ECEBE6;--mut:#A9A79F;--line:#45443F;--bg:#1C1C1A;--card:#262624;--head:#30302D;--acc:#5DCAA5;--ok:#5DCAA5;--bad:#F09595;--tmpl:#8AB8F0;--warn:#EFB46B}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.65 "Pretendard","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:23px;font-weight:600;margin:0 0 4px}
+.sub,.note{color:var(--mut);font-size:13px}
+form{display:flex;gap:8px;margin:18px 0 8px;flex-wrap:wrap}
+input[type=text]{flex:1 1 320px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font:inherit}
+button{padding:10px 16px;border:0;border-radius:10px;background:var(--acc);color:#fff;font:inherit;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+label{font-size:13px;color:var(--mut);display:flex;align-items:center;gap:6px}
+.ex{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 18px}
+.ex button{background:var(--card);color:var(--fg);border:1px solid var(--line);padding:4px 10px;font-size:13px;border-radius:999px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:12px 0}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.chip{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:1px 10px;font-size:12.5px;white-space:nowrap;color:var(--mut)}
+.chip.mode-llm{border-color:var(--ok);color:var(--ok)} .chip.mode-template{border-color:var(--tmpl);color:var(--tmpl)}
+.chip.mode-abstain{border-color:var(--bad);color:var(--bad)} .chip.mode-fallback{border-color:var(--warn);color:var(--warn)}
+.sent{margin:8px 0;padding-left:10px;border-left:3px solid var(--line)}
+.sent.ok{border-color:var(--ok)} .sent.tmpl{border-color:var(--tmpl)}
+.badges{font-size:12px;color:var(--mut)}
+.badges b{font-weight:600}
+a.cite{color:var(--tmpl);text-decoration:none;font-size:12.5px;margin-left:2px}
+.ev{margin:8px 0;padding:6px 10px;border-left:3px solid var(--line);font-size:14px}
+.ev.quote{background:var(--head)} .ev:target{outline:2px solid var(--tmpl)}
+.ev .src{color:var(--mut);font-size:12.5px}
+.abstain{color:var(--bad);font-weight:600}
+</style>
+</head>
+<body><main>
+<div class="sub">로컬 실행 · 2024-01~2025-12 17개 광역의회 회의록 · 근거가 없는 문장은 내보내지 않음</div>
+<h1>회의록 이슈 질의응답</h1>
+<p class="note">이슈 카드(코드가 계산한 사실)와 회의록 원문에서만 답합니다. LLM을 켜면 문장을 생성한 뒤 문장마다 인용 확인, 날짜·숫자·의회 이름 대조, NLI 함의 검사를 거쳐 통과한 문장만 보여 줍니다.</p>
+<form id="f"><input type="text" id="q" placeholder="예: 도심 복합개발 지원 조례는 어디서 처음 논의됐어?" autocomplete="off">
+<button id="go">근거로 답하기</button>
+<label><input type="checkbox" id="llm"> LLM 문장 생성(검증 후)</label></form>
+<div class="ex" id="ex"></div>
+<div id="out"></div>
+</main>
+<script>
+const EX = ["도심 복합개발 지원 조례는 어디서 처음 논의됐어?", "기후동행카드는 다른 의회로 퍼졌나?",
+  "고교학점제 지원 조례는 앞으로 어디가 할 것 같아?", "전기차 주차구역 화재예방 조례를 왜 만들었대?",
+  "디지털교과서 쟁점이 뭐야?", "부산은 분산에너지에 대해 뭐라고 했어?", "반려동물 보험 의무화는 어디서 처음?"];
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+EX.forEach(t => { const b = document.createElement("button"); b.type = "button"; b.textContent = t;
+  b.onclick = () => { $("#q").value = t; ask(); }; $("#ex").appendChild(b); });
+$("#f").onsubmit = e => { e.preventDefault(); ask(); };
+const MODE = {llm: ["LLM 생성 + 검증 통과", "mode-llm"], template: ["템플릿 답", "mode-template"],
+  "llm→template": ["생성 문장 검증 실패 → 템플릿", "mode-fallback"], abstain: ["답하지 않음", "mode-abstain"]};
+const INTENT = {first: "최초 관측", flow: "흐름", forecast: "예측", reasons: "도입 이유", debate: "쟁점", status: "현황", said: "발언 찾기", summary: "요약"};
+async function ask() {
+  const q = $("#q").value.trim(); if (!q) return;
+  $("#go").disabled = true; $("#out").innerHTML = '<div class="box note">근거를 모으는 중…</div>';
+  try {
+    const r = await fetch(`/api/ask?q=${encodeURIComponent(q)}&llm=${$("#llm").checked ? 1 : 0}`);
+    render(await r.json());
+  } catch (e) { $("#out").innerHTML = `<div class="box abstain">오류: ${esc(e)}</div>`; }
+  $("#go").disabled = false;
+}
+function render(a) {
+  if (!a.llm_available) { $("#llm").disabled = true; $("#llm").parentElement.title = "서버를 --llm으로 실행하면 켤 수 있다"; }
+  const [mname, mcls] = MODE[a.mode] || [a.mode, ""];
+  let h = `<div class="box"><div class="meta"><span class="chip ${mcls}">${esc(mname)}</span>`;
+  if (a.issue) h += `<span class="chip">이슈: ${esc(a.issue)}</span>`;
+  if (a.intent) h += `<span class="chip">질문 유형: ${esc(INTENT[a.intent] || a.intent)}</span>`;
+  if (a.council) h += `<span class="chip">의회: ${esc(a.council)}</span>`;
+  h += `<span class="chip">${a.seconds}초</span></div>`;
+  if (a.mode === "abstain") h += `<div class="abstain">${esc(a.note)}</div>`;
+  for (const s of a.sentences) {
+    const ck = s.checks || {}; const tm = ck.template;
+    const cites = (s.cites || []).map(n => `<a class="cite" href="#ev${n}">[${n}]</a>`).join("");
+    let b = tm ? "템플릿 문장(카드의 계산값)" :
+      `인용 ${ck.has_citation ? "✓" : "✗"} · 개체 대조 ${ck.entities_supported ? "✓" : "✗ " + esc((ck.missing || []).join(", "))}` +
+      (ck.nli_entail !== undefined ? ` · NLI 함의 <b>${ck.nli_entail}</b>` : "");
+    h += `<div class="sent ${tm ? "tmpl" : (s.ok ? "ok" : "")}">${esc(s.text)} ${cites}<div class="badges">${b}</div></div>`;
+  }
+  if (a.note && a.mode !== "abstain") h += `<div class="note">${esc(a.note)}</div>`;
+  h += "</div>";
+  if (a.evidence && a.evidence.length) {
+    h += `<div class="box"><div class="note">근거 (사실 = 이슈 카드에서 코드가 계산한 값, 원문 = 회의록 인용)</div>`;
+    for (const e of a.evidence) {
+      const src = e.kind === "quote" ? `<div class="src">${esc(e.src.council)} · ${esc(e.src.date)} · ${esc(e.src.doc)}${e.src.role ? " · " + esc(e.src.role) : ""}</div>` : "";
+      h += `<div class="ev ${e.kind}" id="ev${e.n}"><b>[${e.n}]</b> ${e.kind === "quote" ? "원문" : "사실"} — ${esc(e.text)}${src}</div>`;
+    }
+    h += "</div>";
+  }
+  $("#out").innerHTML = h;
+}
+</script>
+</body></html>

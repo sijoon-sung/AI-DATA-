@@ -58,7 +58,8 @@ def cite(row, quote, kind="발언"):
     ok = core in str(row.text).replace("\n", " ") if hasattr(row, "text") else None
     return {"council": row.council_short, "date": str(row.date.date()), "doc": row.mints_nm, "doc_id": row.doc_id,
             "role": getattr(row, "role", ""), "kind": kind, "quote": quote, "verified": ok,
-            "rel": None if pd.isna(getattr(row, "rel", np.nan)) else round(float(row.rel), 2)}
+            "rel": None if pd.isna(getattr(row, "rel", np.nan)) else round(float(row.rel), 2),
+            "via": getattr(row, "source", "alias")}
 
 
 # ---------------------------------------------------------------- 의결
@@ -191,10 +192,9 @@ REGION_WORDS = set(FULLNAME.values()) | {"서울특별시", "부산광역시", "
                                         "전라남도", "전라북도", "경상남도", "경상북도", "경기도", "광역시", "특별시", "특별자치도"}
 
 
-def references(pas, alias, nli=None):
-    """E1 명시적 참조. 규칙 후보(다른 의회 이름 + 정책 단서 + 이슈 별칭이 가까이)를 모은 뒤,
-    nli가 있으면 '○○시는 어떤 정책을 시행하고 있다'는 내용 가설의 함의 확률이 NLI_TAU 이상인 것만 남긴다
-    (KLUE-NLI로 학습한 KoELECTRA, src/nli.py)."""
+def reference_candidates(pas, alias, nli=None):
+    """E1 규칙 후보: 다른 의회 이름이 든 문장에 정책 단서와 이슈 별칭이 함께 있는 경우. nli가 있으면 각 후보에
+    '○○시는 어떤 정책을 시행하고 있다'는 내용 가설의 함의 확률(nli)을 붙인다(거르지는 않는다. 검수 표본에도 쓴다)."""
     out, prem, hyp = [], [], []
     for r in pas.itertuples():
         sents = [(x.start(), x.end()) for x in re.finditer(r"[^.?!\n]+[.?!]?", r.text)]
@@ -212,7 +212,8 @@ def references(pas, alias, nli=None):
                     continue
                 one = r.text[sents[k][0]: sents[k][1]].strip()
                 if POLICY_CUE.search(one) and re.search(alias, one):
-                    out.append({**cite(r, one[:220] + ("…" if len(one) > 220 else "")), "to": a})
+                    out.append({**cite(r, one[:220] + ("…" if len(one) > 220 else "")), "to": a, "pid": getattr(r, "pid", None),
+                                "sentence": one, "span": [m.start() - sents[k][0], m.end() - sents[k][0]]})
                     prem.append(one)
                     hyp.append(f"{FULLNAME[a]}는 어떤 정책을 시행하고 있다.")
                     break
@@ -220,7 +221,16 @@ def references(pas, alias, nli=None):
         ent = nli.nli_probs(prem, hyp)[:, 0]
         for o, p in zip(out, ent):
             o["nli"] = round(float(p), 3)
+    return out
+
+
+def references(pas, alias, nli=None):
+    """E1 명시적 참조: 규칙 후보 중 NLI 함의 확률이 NLI_TAU 이상인 것(KLUE-NLI로 학습한 KoELECTRA, src/nli.py).
+    돌려주는 값: (의회 쌍 목록, 쌍마다 가장 이른 예시)."""
+    out = reference_candidates(pas, alias, nli)
+    if nli is not None:
         out = [o for o in out if o["nli"] >= NLI_TAU]
+    out = [{k: v for k, v in o.items() if k not in ("sentence", "span")} for o in out]
     df = pd.DataFrame(out)
     if df.empty:
         return [], []
@@ -437,6 +447,7 @@ def build_card(spec, pas, bills, totals, docs_path, fc_rows, fc_meta, model, kiw
         "issue_id": spec["issue_id"], "kind": spec["kind"], "issue": spec["name"], "theme": spec.get("theme", ""),
         "title": spec["title"], "aliases": spec["aliases"], "alias_stats": spec.get("alias_stats", []),
         "n_candidates": n_cand, "n_passages": int(len(pas)), "n_councils": n_c,
+        "n_semantic": int((pas.source == "semantic").sum()) if "source" in pas else 0,
         "left_censored": early >= max(3, n_c // 3), "n_early": early, "first": first, "first_confirmed": first_conf,
         "status": status, "trend": tr, "edges": edges, "ref_examples": ref_ex, "laws": law_summ, "top_law": top_law,
         "type": itype, "type_why": why, "adopters": adopters, "clusters": clus, "reasons": reasons(pas, bills, alias),

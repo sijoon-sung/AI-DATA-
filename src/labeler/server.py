@@ -1,9 +1,9 @@
 """정답셋 검수 도구 서버 (표준 라이브러리만 사용, 127.0.0.1에서만 열림).
 
-실행: uv run python -m src.labeler.server  →  http://127.0.0.1:8765
-  표본: data/labels/pool_{task}.jsonl  (scripts/06_label_pool.py가 만든다)
+실행: python src/labeler/server.py  →  http://127.0.0.1:8765
+  표본: data/labels/pool_{task}.jsonl  (ref·proc·topdown은 scripts/06_label_pool.py, rel·e1은 scripts/12_eval_pools.py가 만든다)
   결과: data/labels/gold_{task}.jsonl  (한 줄 = 라벨 하나, 같은 pid는 마지막 줄이 유효)
-규칙 라벨(weak)은 검수자에게 보내지 않는다. 미리 보면 판단이 그쪽으로 끌리기 때문이다.
+규칙 라벨(weak)과 모델 점수·층 정보('_'로 시작하는 열)는 검수자에게 보내지 않는다. 미리 보면 판단이 그쪽으로 끌리기 때문이다.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[2]
 LABELS = ROOT / "data" / "labels"
 HERE = Path(__file__).resolve().parent
-TASKS = ["ref", "proc", "topdown"]
+TASKS = ["rel", "e1", "ref", "proc", "topdown"]
 
 
 def load_pool(task):
@@ -56,7 +56,7 @@ def append_gold(task, rec):
 
 
 def public(item):
-    return {k: v for k, v in item.items() if k != "weak"}
+    return {k: v for k, v in item.items() if k != "weak" and not k.startswith("_")}
 
 
 class Handler(BaseHTTPRequestHandler):

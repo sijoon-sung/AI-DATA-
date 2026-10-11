@@ -27,7 +27,8 @@ import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from src import cards, events, forecast, issues  # noqa: E402
+import pyarrow.dataset as ds  # noqa: E402
+from src import cards, events, forecast, issues, retrieve  # noqa: E402
 from src.render_card import competition_row, render, render_index  # noqa: E402
 
 P = ROOT / "data" / "processed"
@@ -36,6 +37,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--n-inst", type=int, default=30)
 ap.add_argument("--n-proper", type=int, default=10)
 ap.add_argument("--reuse-events", action="store_true", help="저장된 사건표와 관련 점수를 다시 쓴다(카드 규칙만 바꿨을 때)")
+ap.add_argument("--no-semantic", action="store_true", help="하이브리드 검색으로 별칭 없는 언급을 찾는 단계를 건너뛴다")
 args = ap.parse_args()
 t0 = time.time()
 
@@ -109,6 +111,8 @@ if args.reuse_events and (P / "events.parquet").exists() and side.exists():
     if meta["aliases"] != {k: [a for a, _ in v] for k, v in pat.items()}:
         sys.exit("저장된 사건표의 이슈·별칭이 지금 목록과 다르다. --reuse-events 없이 다시 실행해야 한다.")
     ev, kept, counts = pd.read_parquet(P / "events.parquet").drop(columns="core", errors="ignore"), meta["kept"], meta["counts"]
+    if args.no_semantic and "source" in ev:
+        ev = ev[ev.source != "semantic"].reset_index(drop=True)
     log(f"사건표 재사용: 문단 {len(ev):,}개")
 else:
     ev, kept, counts = events.scan(P / "passages.parquet", pat, docs)
@@ -154,6 +158,40 @@ for s in specs:
         f'{x["alias"]} {x["n"]:,}' + (" (제외)" if x["prec"] is None and x["status"].startswith("너무") else
                                       f' ({(x["prec"] or 0):.0%}{"" if x["status"].startswith("핵심") else ", 넓음"})')
         for x in stats))
+if "source" not in ev:
+    ev["source"] = "alias"
+ev["source"] = ev.source.fillna("alias")
+
+# ---------------------------------------------------------------- 2-2. 하이브리드 검색으로 별칭 없는 언급 찾기
+# 별칭 정규식은 바꿔 쓴 표현('전기차 충전구역 화재 대책')을 놓친다. 의회별 BM25 + bge-m3 검색을 RRF로 합쳐 찾고
+# (src/retrieve.py), 교차 인코더 점수 0.5 이상만 근거로 쓴다. 발언 전용 고유명사 이슈는 이름 자체가 이슈이므로 하지 않는다.
+if not args.no_semantic and not (ev.source == "semantic").any() and retrieve.index_ready():
+    import torch
+    from sentence_transformers import SentenceTransformer
+    enc = SentenceTransformer("BAAI/bge-m3", device="cuda" if torch.cuda.is_available() else "cpu",
+                              model_kwargs={"torch_dtype": torch.float16} if torch.cuda.is_available() else {})
+    queries = {}
+    for s in specs:
+        if s["kind"] != "inst":
+            continue
+        g = ev[(ev.issue_id == s["issue_id"]) & (ev.core | (ev.rel >= cards.REL_TAU))].nlargest(20, "rel")
+        cen = enc.encode(g.text.str[:600].tolist(), normalize_embeddings=True, convert_to_numpy=True).mean(0)
+        queries[s["issue_id"]] = {"text": s["query"], "tokens": retrieve.bm25_tokens([s["query"]])[0],
+                                  "vecs": [cen / np.linalg.norm(cen)]}
+    hits = retrieve.hybrid_search(queries, k=30, k_each=100, encoder=enc)
+    del enc
+    have = set(zip(ev.issue_id, ev.pid))
+    new = hits[[(q, x) not in have for q, x in zip(hits.qid, hits.pid)]]
+    tbl = ds.dataset(P / "passages.parquet").to_table(columns=events.COLS, filter=ds.field("pid").isin(list(new.pid.unique())))
+    add = (new[["qid", "pid", "rrf"]].rename(columns={"qid": "issue_id"}).merge(tbl.to_pandas(), on="pid").merge(docs, on="doc_id")
+           .assign(alias_bits=0, source="semantic", core=False))
+    add["rel"] = events.relevance(add, {s["issue_id"]: s["query"] for s in specs}).values
+    before = ev[ev.rel >= cards.REL_TAU].groupby(["issue_id", "council_short"]).date.min()
+    ev = pd.concat([ev, add], ignore_index=True).sort_values(["issue_id", "date", "doc_id", "start"]).reset_index(drop=True)
+    after = ev[ev.rel >= cards.REL_TAU].groupby(["issue_id", "council_short"]).date.min()
+    cmp = pd.concat([before.rename("b"), after.rename("a")], axis=1)
+    log(f"하이브리드 검색: 새 후보 {len(add):,}개 중 관련 점수 0.5 이상 {int((add.rel >= cards.REL_TAU).sum()):,}개. "
+        f"확인된 첫 관측이 앞당겨진 (이슈, 의회) {int((cmp.a < cmp.b).sum())}쌍, 새로 생긴 쌍 {int(cmp.b.isna().sum())}개")
 ev.to_parquet(P / "events.parquet", index=False)
 use = ev.core | (ev.rel >= cards.REL_TAU)
 log(f"근거 문단 {int(use.sum()):,}개 / 후보 {len(ev):,}개 (넓은 별칭으로만 걸리고 관련 점수가 낮아 뺀 문단 {int((~use).sum()):,}개)")
@@ -199,4 +237,8 @@ for s in specs:
 built.sort(key=lambda c: -c["rank_score"])
 (OUT / "index.html").write_text(render_index(built, fc_meta), encoding="utf-8")
 pd.DataFrame([competition_row(c) for c in built]).to_csv(ROOT / "results" / "issue_table.csv", index=False, encoding="utf-8-sig")
-log(f"완료: 카드 {len(built)}장, 목차 {OUT / 'index.html'}, 결과표 results/issue_table.csv")
+from src.render_council import COUNCILS as _CS, render_council  # noqa: E402
+(ROOT / "results" / "councils").mkdir(parents=True, exist_ok=True)
+for _c in _CS:
+    (ROOT / "results" / "councils" / f"{_c}.html").write_text(render_council(_c, built), encoding="utf-8")
+log(f"완료: 카드 {len(built)}장, 의회 화면 {len(_CS)}개, 목차 {OUT / 'index.html'}, 결과표 results/issue_table.csv")

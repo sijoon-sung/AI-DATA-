@@ -28,5 +28,6 @@ dependencies:
       - scikit-learn==1.9.1
       - faiss-cpu==1.15.1
       - kiwipiepy==0.24.0
+      - bm25s==0.2.14
       # 로컬 LLM 실행. CUDA DLL은 torch/lib에 있는 것을 쓴다(PATH 앞에 붙여야 함)
       - llama-cpp-python==0.3.36
