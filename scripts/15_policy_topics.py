@@ -63,6 +63,8 @@ def texts_for(pids):
 if args.step == "fit":
     cs = T.ready_councils()
     log(f"밀집 색인이 있는 의회 {len(cs)}곳: {', '.join(cs)}")
+    for old in [*OUT.glob("assign_*.parquet"), OUT / "topics.parquet", OUT / "labels.jsonl", OUT / "families.parquet"]:
+        old.unlink(missing_ok=True)   # 주제 번호가 바뀌므로 이전 배정·이름·가족을 지운다
     cen = T.fit(k=args.k, per_council=args.per_council, until=args.until, councils=cs)
     np.save(OUT / "centroids.npy", cen)
     json.dump({"k": args.k, "per_council": args.per_council, "until": args.until, "councils": cs},
