@@ -32,7 +32,8 @@ sys.path.insert(0, str(ROOT))
 from src.catalog import topics as T  # noqa: E402
 
 ap = argparse.ArgumentParser()
-ap.add_argument("step", choices=["fit", "assign", "describe", "label", "family", "eval"])
+ap.add_argument("step", choices=["check", "fit", "assign", "describe", "label", "family", "names", "eval"])
+ap.add_argument("--name-tau", type=float, default=0.80)
 ap.add_argument("--k", type=int, default=800)
 ap.add_argument("--per-council", type=int, default=12000)
 ap.add_argument("--until", default=None)
@@ -60,7 +61,30 @@ def texts_for(pids):
     return dict(zip(tbl.column("pid").to_pylist(), tbl.column("text").to_pylist()))
 
 
-if args.step == "fit":
+if args.step == "check":
+    ok = True
+    for f in ["docs.parquet", "passages.parquet"]:
+        good = (P / f).exists(); ok &= good
+        print(f"{'OK ' if good else 'X  '} data/processed/{f}")
+    cs = T.ready_councils()
+    print(f"{'OK ' if len(cs) == 17 else '!  '} 밀집 색인 {len(cs)}/17곳 {cs}")
+    try:
+        import torch
+        print(f"{'OK ' if torch.cuda.is_available() else '!  '} GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else '없음(CPU로 매우 느림)'}")
+    except Exception as e:
+        print("X  torch", e); ok = False
+    try:
+        from src.qa import load_llm
+        llm = load_llm(n_ctx=512)
+        r = llm.create_chat_completion(messages=[{"role": "user", "content": "1+1은? 숫자만"}], max_tokens=5)
+        print("OK  로컬 LLM(Qwen2.5-7B) 응답:", r["choices"][0]["message"]["content"].strip())
+    except Exception as e:
+        ok = False
+        print("X  로컬 LLM을 불러오지 못했다:", repr(e)[:300])
+        print("   docs/실행_가이드.md의 'LLM 문제 해결'을 본다")
+    sys.exit(0 if ok else 1)
+
+elif args.step == "fit":
     cs = T.ready_councils()
     log(f"밀집 색인이 있는 의회 {len(cs)}곳: {', '.join(cs)}")
     for old in [*OUT.glob("assign_*.parquet"), OUT / "topics.parquet", OUT / "labels.jsonl", OUT / "families.parquet"]:
@@ -138,6 +162,48 @@ elif args.step == "family":
     fam.to_parquet(OUT / "families.parquet", index=False)
     log(f"정책 주제 {len(pol)}개 / 전체 {len(labs)}개 → 정책 가족 {fam.family.nunique()}개")
 
+elif args.step == "names":
+    # 이름 단위로 묶기: 문단 하나에 여러 사업이 섞여 문단 주제로는 가족이 갈라지거나 섞인다(10/12 측정).
+    # LLM이 뽑은 (의회, 이름)마다 그 이름이 나온 문장만 모아 평균 벡터를 만들고, 그 벡터로 이름끼리 묶는다.
+    import re as _re
+    from sentence_transformers import SentenceTransformer
+    from sklearn.cluster import AgglomerativeClustering
+    labs = [json.loads(x) for x in (OUT / "labels.jsonl").read_text(encoding="utf-8").splitlines() if x.strip()]
+    pairs = {}
+    for x in labs:
+        if not x.get("정책주제"):
+            continue
+        for n in x.get("의회별_정책이름", []):
+            key = (n["의회"], _re.sub(r"\s", "", n["이름"]))
+            pairs.setdefault(key, {"name": n["이름"], "topics": set(), "def": x.get("정의", "")})["topics"].add(x["topic"])
+    names = sorted({k[1] for k in pairs})
+    log(f"LLM이 찾은 (의회, 이름) {len(pairs)}개, 서로 다른 이름 {len(names)}개")
+    pat = {n: _re.compile(r"\s?".join(map(_re.escape, n))) for n in names}
+    union = "|".join(r"\s?".join(map(_re.escape, n)) for n in names)
+    asg = load_assign()[["pid", "council"]]
+    sents = {k: [] for k in pairs}
+    for b in pq.ParquetFile(P / "passages.parquet").iter_batches(columns=["pid", "text"], batch_size=300_000):
+        sub = b.filter(pc.match_substring_regex(b.column("text"), union)).to_pandas().merge(asg, on="pid")
+        for r in sub.itertuples():
+            for sent in _re.split(r"(?<=[.?!])\s+|\n", r.text):
+                for n in names:
+                    k = (r.council, n)
+                    if k in sents and len(sents[k]) < 40 and pat[n].search(sent):
+                        sents[k].append(sent[:300])
+    keys = [k for k in pairs if sents[k]]
+    enc = SentenceTransformer("BAAI/bge-m3")
+    vec = np.stack([enc.encode(sents[k], normalize_embeddings=True).mean(0) for k in keys])
+    vec /= np.linalg.norm(vec, axis=1, keepdims=True)
+    fam = AgglomerativeClustering(n_clusters=None, metric="cosine", linkage="average",
+                                  distance_threshold=1 - args.name_tau).fit(vec).labels_ if len(keys) > 1 else np.zeros(len(keys), int)
+    df = pd.DataFrame([{"council": k[0], "name": pairs[k]["name"], "key": k[1], "name_family": int(f), "n_sent": len(sents[k]),
+                        "정의": pairs[k]["def"], "topics": sorted(pairs[k]["topics"])} for k, f in zip(keys, fam)])
+    df.to_parquet(OUT / "names.parquet", index=False)
+    big = df.groupby("name_family").filter(lambda g: g.council.nunique() >= 3)
+    log(f"이름 {len(df)}개 → 이름 가족 {df.name_family.nunique()}개 (3개 의회 이상에 걸친 가족 {big.name_family.nunique()}개)")
+    for f, g in big.groupby("name_family"):
+        print("  ", " / ".join(f"{r.council}:{r.name}" for r in g.itertuples())[:300])
+
 elif args.step == "eval":
     gold = json.load(open(ROOT / "eval" / "gold_families.json", encoding="utf-8"))
     asg = load_assign()
@@ -165,8 +231,16 @@ elif args.step == "eval":
                     "topic_share": round(float(g.topic.value_counts(normalize=True).iloc[0]), 3),
                     "family": topic2fam.get(top_topic), "not_in": m.get("not_in")})
     R = pd.DataFrame(res)
+    if (OUT / "names.parquet").exists():   # 이름 단위 가족이 있으면: 정답 이름과 글자가 맞는 예측 이름의 가족을 쓴다
+        nm = pd.read_parquet(OUT / "names.parquet")
+        def name_family(m):
+            g = nm[nm.name.str.contains(m["pattern"], regex=True)]
+            if m.get("home"):
+                g = g[g.council == m["home"]]
+            return f"n{int(g.name_family.mode().iloc[0])}" if len(g) else None
+        R["family"] = [name_family(m) for m in items]
     # 쌍 단위 평가: 같은 정답 가족의 두 이름이 같은 예측 단위(가족, 없으면 주제)에 들어갔나
-    unit = R.family.where(R.family.notna(), R.topic.map(lambda t: f"t{t}" if pd.notna(t) else None)) if "family" in R else R.topic
+    unit = R.family.where(R.family.notna(), R.topic.map(lambda t: f"t{int(t)}" if pd.notna(t) else None))
     R["unit"] = unit
     pos = R[R.gold.notna() & R.unit.notna()]
     tp = fp = fn = 0

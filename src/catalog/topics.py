@@ -112,9 +112,12 @@ def parse_label(text: str) -> dict | None:
     if not m:
         return None
     try:
-        return json.loads(m.group(0))
+        d = json.loads(m.group(0))
     except json.JSONDecodeError:
         return None
+    # 모델이 가끔 키를 다른 언어로 쓴다('国家事业' 등): 알려진 키로 맞춘다
+    alias = {"国家事业": "국가사업", "國家事業": "국가사업", "国家项目": "국가사업"}
+    return {alias.get(k, k): v for k, v in d.items()}
 
 
 def verify_names(lab: dict, reps: pd.DataFrame) -> dict:

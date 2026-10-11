@@ -1,4 +1,5 @@
-"""정책 카탈로그를 한 번에 돌린다: 색인 → 주제 군집 → 배정 → 설명 → LLM 이름 → 가족 → 평가.
+"""정책 카탈로그를 한 번에 돌린다: 점검 → 색인 → 주제 군집 → 배정 → 설명 → LLM 이름 → 가족 → 이름 묶기 → 평가.
+자세한 방법과 문제 해결: docs/실행_가이드.md
 
 실행: python scripts/run_catalog.py [--k 800] [--per-council 12000] [--skip-index] [--skip-label] [--until 2024-12-31]
   --skip-index  검색 색인(09)이 이미 다 있으면 건너뛴다(없어도 끝난 의회는 자동으로 건너뛴다)
@@ -27,7 +28,7 @@ if not (ROOT / "data" / "processed" / "passages.parquet").exists():
     sys.exit("data/processed/passages.parquet가 없다. README의 01~04 단계를 먼저 실행한다.")
 
 T = "scripts/15_policy_topics.py"
-steps = []
+steps = [] if args.skip_label else [[T, "check"]]
 if not args.skip_index:
     steps += [["scripts/09_build_index.py", "--part", "bm25"], ["scripts/09_build_index.py", "--part", "dense"]]
 fit = [T, "fit", "--k", str(args.k), "--per-council", str(args.per_council)]
@@ -38,7 +39,7 @@ else:
     steps += [fit, [T, "assign"]]
 steps += [[T, "describe"]]
 if not args.skip_label:
-    steps += [[T, "label"], [T, "family"]]
+    steps += [[T, "label"], [T, "family"], [T, "names"]]
 steps += [[T, "eval"]]
 
 t0 = time.time()
